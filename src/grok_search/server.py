@@ -10,12 +10,28 @@ from fastmcp import FastMCP, Context
 
 # 尝试使用绝对导入（支持 mcp run）
 try:
+    from grok_search.deep_search import (
+        FetchedPage,
+        build_deep_search_user_prompt,
+        build_fallback_report,
+        deduplicate_candidates,
+        markdown_excerpt,
+        parse_search_results,
+    )
     from grok_search.providers.grok import GrokSearchProvider
     from grok_search.utils import format_search_results
     from grok_search.logger import log_info
     from grok_search.config import config
 except ImportError:
     # 降级到相对导入（pip install -e . 后）
+    from .deep_search import (
+        FetchedPage,
+        build_deep_search_user_prompt,
+        build_fallback_report,
+        deduplicate_candidates,
+        markdown_excerpt,
+        parse_search_results,
+    )
     from .providers.grok import GrokSearchProvider
     from .utils import format_search_results
     from .logger import log_info
@@ -24,6 +40,14 @@ except ImportError:
 import asyncio
 
 mcp = FastMCP("grok-search")
+
+
+def _build_provider() -> GrokSearchProvider:
+    api_url = config.grok_api_url
+    api_key = config.grok_api_key
+    model = config.grok_model
+    return GrokSearchProvider(api_url, api_key, model)
+
 
 @mcp.tool(
     name="web_search",
@@ -116,6 +140,124 @@ async def web_fetch(url: str, ctx: Context = None) -> str:
     results = await grok_provider.fetch(url, ctx)
     await log_info(ctx, "Fetch Finished!", config.debug_enabled)
     return results
+
+
+@mcp.tool(
+    name="deep_search",
+    output_schema=None,
+    description="""
+    Executes a high-level research workflow and returns a detailed Markdown answer.
+
+    Workflow
+    --------
+    1. Use existing search capability to gather candidate sources.
+    2. Parse and normalize result lists robustly.
+    3. Deduplicate and fetch top pages.
+    4. Synthesize a detailed answer with inline citations and a final source list.
+
+    Parameters
+    ----------
+    query : str
+        The research question or search topic.
+    platform : str
+        Optional platform focus, such as Twitter/GitHub/Reddit.
+    search_results : int
+        Maximum number of candidate search results to collect.
+    fetch_results : int
+        Number of top candidate pages to fetch and read in depth.
+    max_chars_per_source : int
+        Maximum excerpt size retained per fetched source for synthesis.
+
+    Returns
+    -------
+    str
+        A detailed Markdown answer with:
+        - short conclusions first
+        - topic-based detailed analysis
+        - explicit inline citations like [来源1]
+        - a final `## 来源` section
+    """
+)
+async def deep_search(
+    query: str,
+    platform: str = "",
+    search_results: int = 8,
+    fetch_results: int = 3,
+    max_chars_per_source: int = 6000,
+    ctx: Context = None,
+) -> str:
+    try:
+        grok_provider = _build_provider()
+    except ValueError as e:
+        error_msg = str(e)
+        if ctx:
+            await ctx.report_progress(error_msg)
+        return f"配置错误: {error_msg}"
+
+    search_results = max(3, min(search_results, 12))
+    fetch_results = max(1, min(fetch_results, search_results, 5))
+    max_chars_per_source = max(1000, min(max_chars_per_source, 12000))
+
+    await log_info(ctx, f"Begin Deep Search: {query}", config.debug_enabled)
+    raw_results = await grok_provider.search(query, platform, min(fetch_results, search_results), search_results, ctx)
+
+    try:
+        parsed_candidates = parse_search_results(raw_results)
+    except ValueError as exc:
+        await log_info(ctx, f"Deep Search parse failed: {exc}", config.debug_enabled)
+        return (
+            "# 深度搜索未能解析结构化结果\n\n"
+            f"- 查询：{query}\n"
+            f"- 原因：{exc}\n\n"
+            "## 原始搜索输出\n\n"
+            f"{raw_results}"
+        )
+
+    selected_candidates = deduplicate_candidates(parsed_candidates, limit=fetch_results)
+    if ctx:
+        await ctx.report_progress(progress=30, total=100)
+        await ctx.info(f"已选出 {len(selected_candidates)} 个候选来源，开始抓取正文")
+
+    semaphore = asyncio.Semaphore(3)
+
+    async def _fetch_candidate(candidate):
+        async with semaphore:
+            try:
+                markdown = await grok_provider.fetch(candidate.url, ctx)
+                excerpt = markdown_excerpt(markdown, max_chars=max_chars_per_source)
+                return FetchedPage(
+                    title=candidate.title,
+                    url=candidate.url,
+                    description=candidate.description,
+                    excerpt=excerpt,
+                )
+            except Exception as exc:
+                await log_info(ctx, f"Deep Search fetch failed for {candidate.url}: {exc}", config.debug_enabled)
+                return None
+
+    fetched_pages = [
+        page
+        for page in await asyncio.gather(*[_fetch_candidate(candidate) for candidate in selected_candidates])
+        if page is not None
+    ]
+
+    if ctx:
+        await ctx.report_progress(progress=70, total=100)
+        await ctx.info(f"已完成 {len(fetched_pages)} 个来源正文抓取，开始综合分析")
+
+    synthesis_prompt = build_deep_search_user_prompt(query, selected_candidates, fetched_pages)
+
+    try:
+        report = await grok_provider.deep_search(synthesis_prompt, ctx)
+        final_report = report.strip() or build_fallback_report(query, selected_candidates, fetched_pages)
+    except Exception as exc:
+        await log_info(ctx, f"Deep Search synthesis failed: {exc}", config.debug_enabled)
+        final_report = build_fallback_report(query, selected_candidates, fetched_pages)
+
+    if ctx:
+        await ctx.report_progress(progress=100, total=100)
+    await log_info(ctx, "Deep Search Finished!", config.debug_enabled)
+    return final_report
 
 
 @mcp.tool(

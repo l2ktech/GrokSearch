@@ -160,13 +160,14 @@ claude mcp list
 | Tool | Parameters | Output | Use Case |
 |------|------------|--------|----------|
 | `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
+| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 一次返回详细、全面、可引用的研究答案 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
 | `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
 | `toggle_builtin_tools` | `action`(可选: on/off/status) | `{blocked,deny_list,file}` | 禁用/启用官方工具 |
 
 ## 执行策略
-**查询构建**：广度用 `web_search`，深度用 `web_fetch`，特定平台设 `platform` 参数
+**查询构建**：广度用 `web_search`，需要一次返回详细研究答案时优先用 `deep_search`，单一链接正文抓取用 `web_fetch`，特定平台设 `platform` 参数
 **搜索执行**：优先摘要 → 关键 URL 补充完整内容 → 结果不足调整查询重试（禁止放弃）
 **结果整合**：交叉验证 + **强制标注来源** `[标题](URL)` + 时间敏感信息注明日期
 
@@ -201,6 +202,7 @@ claude mcp list
   | 需求场景 | ❌ 禁用 (Built-in) | ✅ 强制使用 (GrokSearch) |
   | :--- | :--- | :--- |
   | 网络搜索 | `WebSearch` | `mcp__grok-search__web_search` |
+  | 详细研究搜索 | N/A | `mcp__grok-search__deep_search` |
   | 网页抓取 | `WebFetch` | `mcp__grok-search__web_fetch` |
   | 配置诊断 | N/A | `mcp__grok-search__get_config_info` |
 
@@ -209,6 +211,7 @@ claude mcp list
 | Tool | Parameters | Output | Use Case |
 |------|------------|--------|----------|
 | `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
+| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 一次返回详细、全面、可引用的研究答案 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
 | `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |

@@ -7,7 +7,7 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait
 from tenacity.wait import wait_base
 from zoneinfo import ZoneInfo
 from .base import BaseSearchProvider, SearchResult
-from ..utils import search_prompt, fetch_prompt
+from ..utils import deep_search_prompt, fetch_prompt, search_prompt
 from ..logger import log_info
 from ..config import config
 
@@ -154,7 +154,8 @@ class GrokSearchProvider(BaseSearchProvider):
                 },
                 {"role": "user", "content": time_context + query + platform_prompt + return_prompt },
             ],
-            "stream": True,
+            # 与部分 OpenAI 兼容网关联调时，非流式更稳定（避免 SSE 长连接超时）
+            "stream": False,
         }
 
         await log_info(ctx, f"platform_prompt: { query + platform_prompt + return_prompt}", config.debug_enabled)
@@ -175,9 +176,28 @@ class GrokSearchProvider(BaseSearchProvider):
                 },
                 {"role": "user", "content": url + "\n获取该网页内容并返回其结构化Markdown格式" },
             ],
-            "stream": True,
+            # 与部分 OpenAI 兼容网关联调时，非流式更稳定（避免 SSE 长连接超时）
+            "stream": False,
         }
         return await self._execute_stream_with_retry(headers, payload, ctx)
+
+    async def complete(self, system_prompt: str, user_prompt: str, ctx=None) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+        }
+        return await self._execute_stream_with_retry(headers, payload, ctx)
+
+    async def deep_search(self, user_prompt: str, ctx=None) -> str:
+        return await self.complete(deep_search_prompt, user_prompt, ctx)
 
     async def _parse_streaming_response(self, response, ctx=None) -> str:
         content = ""
@@ -192,17 +212,20 @@ class GrokSearchProvider(BaseSearchProvider):
 
             # 兼容 "data: {...}" 和 "data:{...}" 两种 SSE 格式
             if line.startswith("data:"):
-                if line in ("data: [DONE]", "data:[DONE]"):
-                    continue
+                payload = line[5:].lstrip()
+                if payload == "[DONE]":
+                    break
                 try:
-                    # 去掉 "data:" 前缀，并去除可能的空格
-                    json_str = line[5:].lstrip()
-                    data = json.loads(json_str)
+                    data = json.loads(payload)
                     choices = data.get("choices", [])
                     if choices and len(choices) > 0:
-                        delta = choices[0].get("delta", {})
-                        if "content" in delta:
+                        first_choice = choices[0]
+                        delta = first_choice.get("delta", {})
+                        if "content" in delta and delta["content"] is not None:
                             content += delta["content"]
+                        # 某些 OpenAI 兼容实现不会立刻断开连接，优先按 finish_reason 结束读取
+                        if first_choice.get("finish_reason") is not None:
+                            break
                 except (json.JSONDecodeError, IndexError):
                     continue
                 
