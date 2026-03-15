@@ -33,5 +33,5 @@
 - [2026-03-15] `.venv` 中未安装 `pytest`，直接执行 `./.venv/bin/python -m pytest -q` 失败 -> 改用 `uv run --extra dev pytest -q` 完成测试。
 
 ## 进度
-- 当前：任务完成，`deep_search` 已上线并通过真实调用验证
-- 下一步：根据实际使用反馈继续优化抓取数量、提示词和输出结构
+- 当前：任务完成，`web_search` 已切换为默认详细搜索；旧的候选列表工具已改名为 `web_search_candidates`；`deep_search` 作为兼容别名保留。
+- 下一步：根据实际使用反馈继续优化抓取数量、提示词和输出结构，并观察客户端 schema 刷新是否及时。

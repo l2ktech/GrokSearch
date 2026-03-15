@@ -50,30 +50,32 @@ def _build_provider() -> GrokSearchProvider:
 
 
 @mcp.tool(
-    name="web_search",
+    name="web_search_candidates",
     output_schema=None,
     description="""
-    Performs a third-party web search based on the given query and returns the results
-    as a JSON string.
+    Performs a third-party web search and returns raw candidate results as a JSON list.
 
-    The `query` should be a clear, self-contained natural-language search query.
-    When helpful, include constraints such as topic, time range, language, or domain.
+    Use this tool when you explicitly want search hit candidates (title/url/description)
+    instead of a synthesized long-form answer.
 
-    The `platform` should be the platforms which you should focus on searching, such as "Twitter", "GitHub", "Reddit", etc.
-
-    The `min_results` and `max_results` should be the minimum and maximum number of results to return.
+    Parameters
+    ----------
+    query : str
+        Search query.
+    platform : str
+        Optional platform focus, such as Twitter/GitHub/Reddit.
+    min_results : int
+        Minimum desired result count.
+    max_results : int
+        Maximum desired result count.
 
     Returns
     -------
     str
-        A JSON-encoded string representing a list of search results. Each result
-        includes at least:
-        - `url`: the link to the result
-        - `title`: a short title
-        - `summary`: a brief description or snippet of the page content.
+        A JSON-encoded candidate list. Each result includes title, url and summary/description.
     """
 )
-async def web_search(query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx: Context = None) -> str:
+async def web_search_candidates(query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx: Context = None) -> str:
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
@@ -86,9 +88,9 @@ async def web_search(query: str, platform: str = "", min_results: int = 3, max_r
 
     grok_provider = GrokSearchProvider(api_url, api_key, model)
 
-    await log_info(ctx, f"Begin Search: {query}", config.debug_enabled)
+    await log_info(ctx, f"Begin Search Candidates: {query}", config.debug_enabled)
     results = await grok_provider.search(query, platform, min_results, max_results, ctx)
-    await log_info(ctx, "Search Finished!", config.debug_enabled)
+    await log_info(ctx, "Search Candidates Finished!", config.debug_enabled)
     return results
 
 
@@ -142,43 +144,7 @@ async def web_fetch(url: str, ctx: Context = None) -> str:
     return results
 
 
-@mcp.tool(
-    name="deep_search",
-    output_schema=None,
-    description="""
-    Executes a high-level research workflow and returns a detailed Markdown answer.
-
-    Workflow
-    --------
-    1. Use existing search capability to gather candidate sources.
-    2. Parse and normalize result lists robustly.
-    3. Deduplicate and fetch top pages.
-    4. Synthesize a detailed answer with inline citations and a final source list.
-
-    Parameters
-    ----------
-    query : str
-        The research question or search topic.
-    platform : str
-        Optional platform focus, such as Twitter/GitHub/Reddit.
-    search_results : int
-        Maximum number of candidate search results to collect.
-    fetch_results : int
-        Number of top candidate pages to fetch and read in depth.
-    max_chars_per_source : int
-        Maximum excerpt size retained per fetched source for synthesis.
-
-    Returns
-    -------
-    str
-        A detailed Markdown answer with:
-        - short conclusions first
-        - topic-based detailed analysis
-        - explicit inline citations like [来源1]
-        - a final `## 来源` section
-    """
-)
-async def deep_search(
+async def _run_deep_search(
     query: str,
     platform: str = "",
     search_results: int = 8,
@@ -258,6 +224,59 @@ async def deep_search(
         await ctx.report_progress(progress=100, total=100)
     await log_info(ctx, "Deep Search Finished!", config.debug_enabled)
     return final_report
+
+
+@mcp.tool(
+    name="web_search",
+    output_schema=None,
+    description="""
+    Executes the default high-level search workflow and returns a detailed Markdown answer.
+
+    This is the primary search tool for end users. It performs search, fetch and synthesis,
+    and returns a comprehensive answer with inline citations and a final source list.
+
+    Parameters
+    ----------
+    query : str
+        The research question or search topic.
+    platform : str
+        Optional platform focus, such as Twitter/GitHub/Reddit.
+    search_results : int
+        Maximum number of candidate search results to collect.
+    fetch_results : int
+        Number of top candidate pages to fetch and read in depth.
+    max_chars_per_source : int
+        Maximum excerpt size retained per fetched source for synthesis.
+    """
+)
+async def web_search(
+    query: str,
+    platform: str = "",
+    search_results: int = 8,
+    fetch_results: int = 3,
+    max_chars_per_source: int = 6000,
+    ctx: Context = None,
+) -> str:
+    return await _run_deep_search(query, platform, search_results, fetch_results, max_chars_per_source, ctx)
+
+
+@mcp.tool(
+    name="deep_search",
+    output_schema=None,
+    description="""
+    Alias of `web_search` that keeps backward compatibility for clients already using the old deep-search name.
+    Returns the same detailed Markdown answer with citations and a final source list.
+    """
+)
+async def deep_search(
+    query: str,
+    platform: str = "",
+    search_results: int = 8,
+    fetch_results: int = 3,
+    max_chars_per_source: int = 6000,
+    ctx: Context = None,
+) -> str:
+    return await _run_deep_search(query, platform, search_results, fetch_results, max_chars_per_source, ctx)
 
 
 @mcp.tool(

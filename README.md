@@ -159,15 +159,16 @@ claude mcp list
 
 | Tool | Parameters | Output | Use Case |
 |------|------------|--------|----------|
-| `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
-| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 一次返回详细、全面、可引用的研究答案 |
+| `web_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 默认详细搜索，一次返回完整答案 |
+| `web_search_candidates` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 仅获取候选来源列表 / 调试搜索命中 |
+| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | `web_search` 的兼容别名 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
 | `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
 | `toggle_builtin_tools` | `action`(可选: on/off/status) | `{blocked,deny_list,file}` | 禁用/启用官方工具 |
 
 ## 执行策略
-**查询构建**：广度用 `web_search`，需要一次返回详细研究答案时优先用 `deep_search`，单一链接正文抓取用 `web_fetch`，特定平台设 `platform` 参数
+**查询构建**：默认优先用 `web_search` 返回详细答案；只在需要原始候选链接/摘要时用 `web_search_candidates`；单一链接正文抓取用 `web_fetch`，特定平台设 `platform` 参数
 **搜索执行**：优先摘要 → 关键 URL 补充完整内容 → 结果不足调整查询重试（禁止放弃）
 **结果整合**：交叉验证 + **强制标注来源** `[标题](URL)` + 时间敏感信息注明日期
 
@@ -201,8 +202,9 @@ claude mcp list
   ### 强制替换规则
   | 需求场景 | ❌ 禁用 (Built-in) | ✅ 强制使用 (GrokSearch) |
   | :--- | :--- | :--- |
-  | 网络搜索 | `WebSearch` | `mcp__grok-search__web_search` |
-  | 详细研究搜索 | N/A | `mcp__grok-search__deep_search` |
+  | 网络搜索（默认详细答案） | `WebSearch` | `mcp__grok-search__web_search` |
+  | 原始候选结果列表 | N/A | `mcp__grok-search__web_search_candidates` |
+  | 兼容旧详细搜索调用 | N/A | `mcp__grok-search__deep_search` |
   | 网页抓取 | `WebFetch` | `mcp__grok-search__web_fetch` |
   | 配置诊断 | N/A | `mcp__grok-search__get_config_info` |
 
@@ -210,8 +212,9 @@ claude mcp list
 
 | Tool | Parameters | Output | Use Case |
 |------|------------|--------|----------|
-| `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
-| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 一次返回详细、全面、可引用的研究答案 |
+| `web_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | 默认详细搜索，一次返回完整答案 |
+| `web_search_candidates` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 仅获取候选来源列表 / 调试搜索命中 |
+| `deep_search` | `query`(必填), `platform`/`search_results`/`fetch_results`(可选) | Detailed Markdown with citations | `web_search` 的兼容别名 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
 | `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
@@ -222,16 +225,18 @@ claude mcp list
 
   ### Phase 1: 查询构建 (Query Construction)
   1.  **意图识别**：分析用户需求，确定搜索类型：
-      - **广度搜索**：多源信息聚合 → 使用 `web_search`
+      - **默认详细搜索**：多源检索 + 正文抓取 + 综合分析 → 使用 `web_search`
+      - **候选列表搜索**：只看命中链接和摘要 → 使用 `web_search_candidates`
       - **深度获取**：单一 URL 完整内容 → 使用 `web_fetch`
   2.  **参数优化**：
       - 若需聚焦特定平台，设置 `platform` 参数
       - 根据需求复杂度调整 `min_results` / `max_results`
 
   ### Phase 2: 搜索执行 (Search Execution)
-  1.  **首选策略**：优先使用 `web_search` 获取结构化摘要
-  2.  **深度补充**：若摘要不足以回答问题，对关键 URL 调用 `web_fetch` 获取完整内容
-  3.  **迭代检索**：若首轮结果不满足需求，**调整查询词**后重新搜索（禁止直接放弃）
+  1.  **首选策略**：优先使用 `web_search` 直接返回详细研究答案
+  2.  **原始结果模式**：若你只想看候选命中列表，再调用 `web_search_candidates`
+  3.  **深度补充**：若需要单独核验某个页面，对关键 URL 调用 `web_fetch` 获取完整内容
+  4.  **迭代检索**：若首轮结果不满足需求，**调整查询词**后重新搜索（禁止直接放弃）
 
   ### Phase 3: 结果整合 (Result Synthesis)
   1.  **信息验证**：交叉比对多源结果，识别矛盾信息
@@ -259,7 +264,7 @@ claude mcp list
   ---
   模块说明：
   - 强制替换：明确禁用内置工具，强制路由到 GrokSearch
-  - 三工具覆盖：web_search + web_fetch + get_config_info
+  - 四工具覆盖：web_search + web_search_candidates + web_fetch + get_config_info
   - 错误处理：包含配置诊断的恢复策略
   - 引用规范：强制标注来源，符合信息可追溯性要求
 ````
@@ -270,9 +275,41 @@ claude mcp list
 
 #### MCP 工具说明
 
-本项目提供五个 MCP 工具：
+本项目提供六个 MCP 工具：
 
-##### `web_search` - 网络搜索
+##### `web_search` - 默认详细搜索
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | string | ✅ | - | 搜索查询语句 |
+| `platform` | string | ❌ | `""` | 聚焦搜索平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
+| `search_results` | int | ❌ | `8` | 候选搜索结果上限 |
+| `fetch_results` | int | ❌ | `3` | 深度抓取正文的来源数量 |
+| `max_chars_per_source` | int | ❌ | `6000` | 每个来源保留的最大正文摘录长度 |
+
+**返回**：详细 Markdown 答案，包含结论摘要、分节分析、内联引用和 `## 来源`
+
+<details>
+<summary><b>返回示例</b>（点击展开）</summary>
+
+```markdown
+# 某主题研究结果
+
+## 结论摘要
+- 关键结论 A。[来源1]
+- 关键结论 B。[来源2]
+
+## 详细分析
+### 主题一
+...
+
+## 来源
+- [来源1] 标题 - URL
+- [来源2] 标题 - URL
+```
+</details>
+
+##### `web_search_candidates` - 候选结果列表搜索
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
@@ -282,7 +319,6 @@ claude mcp list
 | `max_results` | int | ❌ | `10` | 最多返回结果数 |
 
 **返回**：包含 `title`、`url`、`content` 的 JSON 数组
-
 
 <details>
 <summary><b>返回示例</b>（点击展开）</summary>
@@ -298,13 +334,14 @@ claude mcp list
     "title": "Model Context Protocol (MCP) 技术规范",
     "url": "https://modelcontextprotocol.io/docs",
     "description": "MCP协议官方文档，定义了AI模型与外部工具的标准化通信接口"
-  },
-  {
-    ...
   }
 ]
 ```
 </details>
+
+##### `deep_search` - 兼容别名
+
+与 `web_search` 行为相同，保留给已经接入旧 `deep_search` 名称的客户端使用。
 
 ##### `web_fetch` - 网页内容抓取
 
