@@ -114,9 +114,10 @@ class Config:
         if self._cached_model is not None:
             return self._cached_model
 
+        file_model = self._load_config_file().get("model")
         model = (
-            os.getenv("GROK_MODEL")
-            or self._load_config_file().get("model")
+            file_model
+            or os.getenv("GROK_MODEL")
             or self._DEFAULT_MODEL
         )
         self._cached_model = self._apply_model_suffix(model)
