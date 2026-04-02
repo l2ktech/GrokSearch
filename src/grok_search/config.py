@@ -10,7 +10,8 @@ class Config:
         '"git+https://github.com/GuDaStudio/GrokSearch","grok-search"],'
         '"env":{"GROK_API_URL":"your-api-url","GROK_API_KEY":"your-api-key"}}\''
     )
-    _DEFAULT_MODEL = "grok-4-fast"
+    _DEFAULT_MODEL = "grok-4.1-fast"
+    _DEFAULT_FALLBACK_MODELS = ("grok-4.1-fast", "grok-4.1-thinking", "grok-4")
 
     def __new__(cls):
         if cls._instance is None:
@@ -123,6 +124,33 @@ class Config:
         self._cached_model = self._apply_model_suffix(model)
         return self._cached_model
 
+    @property
+    def model_fallback_enabled(self) -> bool:
+        return os.getenv("GROK_ENABLE_MODEL_FALLBACK", "true").lower() in ("true", "1", "yes")
+
+    @property
+    def fallback_models(self) -> tuple[str, ...]:
+        raw = os.getenv("GROK_FALLBACK_MODELS", "")
+        if raw.strip():
+            models = [item.strip() for item in raw.split(",") if item.strip()]
+        else:
+            models = list(self._DEFAULT_FALLBACK_MODELS)
+        return tuple(
+            adjusted
+            for model in models
+            if (adjusted := self._apply_model_suffix(model))
+        )
+
+    def get_fallback_models_for(self, model: str) -> tuple[str, ...]:
+        if not self.model_fallback_enabled:
+            return ()
+
+        normalized = model.lower()
+        if normalized.startswith("grok-4.20") or normalized.startswith("grok-4.2"):
+            return tuple(candidate for candidate in self.fallback_models if candidate != model)
+
+        return ()
+
     def set_model(self, model: str) -> None:
         config_data = self._load_config_file()
         config_data["model"] = model
@@ -152,6 +180,8 @@ class Config:
             "GROK_API_URL": api_url,
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
+            "GROK_ENABLE_MODEL_FALLBACK": self.model_fallback_enabled,
+            "GROK_FALLBACK_MODELS": list(self.fallback_models),
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),

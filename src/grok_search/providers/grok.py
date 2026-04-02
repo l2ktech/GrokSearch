@@ -243,8 +243,12 @@ class GrokSearchProvider(BaseSearchProvider):
 
         return content
 
-    async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
-        """执行带重试机制的流式 HTTP 请求"""
+    def _candidate_models(self, primary_model: str) -> tuple[str, ...]:
+        fallback_models = config.get_fallback_models_for(primary_model)
+        return (primary_model, *fallback_models)
+
+    async def _execute_payload_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
+        """对单个模型执行带重试的 HTTP 请求。"""
         timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
 
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -263,3 +267,31 @@ class GrokSearchProvider(BaseSearchProvider):
                     ) as response:
                         response.raise_for_status()
                         return await self._parse_streaming_response(response, ctx)
+
+    async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
+        """执行带重试的请求，并在 4.20 链路失败时自动降级到 4.1。"""
+        primary_model = payload.get("model", self.model)
+        last_exc = None
+
+        for attempt_index, model in enumerate(self._candidate_models(primary_model)):
+            model_payload = dict(payload)
+            model_payload["model"] = model
+
+            try:
+                if attempt_index > 0:
+                    await log_info(
+                        ctx,
+                        f"Primary model {primary_model} failed, fallback to {model}",
+                        config.debug_enabled,
+                    )
+                return await self._execute_payload_with_retry(headers, model_payload, ctx)
+            except Exception as exc:
+                last_exc = exc
+                has_next_model = attempt_index + 1 < len(self._candidate_models(primary_model))
+                if not has_next_model or not _is_retryable_exception(exc):
+                    raise
+
+        if last_exc is not None:
+            raise last_exc
+
+        raise RuntimeError("搜索请求未执行")
