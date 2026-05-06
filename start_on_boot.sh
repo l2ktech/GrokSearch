@@ -4,7 +4,7 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export GROK_API_URL="http://192.168.193.13:8000/v1"
 export GROK_API_KEY="grok2api"
-DEFAULT_GROK_MODEL="${GROK_MODEL:-grok-4.1-fast}"
+DEFAULT_GROK_MODEL="${GROK_MODEL:-grok-4.20-0309}"
 UV_BIN="/Users/wzy/.local/bin/uv"
 CONFIG_DIR="/Users/wzy/.config/grok-search"
 CONFIG_FILE="$CONFIG_DIR/config.json"
